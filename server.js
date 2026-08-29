@@ -1,555 +1,1156 @@
+// Railway Proxy Server — Reverse Proxy for hirerivet.up.railway.app
+// Deploy this to Railway
+
 const express = require('express');
 const compression = require('compression');
-const { getJobData, getJobSchema, TOTAL_JOBS, jobTitles, companies, canadaLocations, industries } = require('./jobData');
+const axios = require('axios');
+const NodeCache = require('node-cache');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(compression());
-app.use(express.static(__dirname)); // ✅ This serves apply-now.html
-app.use(express.static('public'));
+// ─── ORIGIN DOMAIN ──────────────────────────────────────────────────────────────
+const ORIGIN_DOMAIN = 'hirerivet.up.railway.app';
+const BASE_URL = process.env.BASE_URL || 'https://hirerivet-proxy.up.railway.app';
 
-// ─── AD CONFIGURATION ──────────────────────────────────────────────────────────
-const AD_SCRIPT = `
+// ─── CACHE CONFIGURATION ──────────────────────────────────────────────────────────
+const cache = new NodeCache({ stdTTL: 86400, checkperiod: 600 }); // 24 hours cache
+
+// ─── AD CONFIGURATION ────────────────────────────────────────────────────────
+const AD_CONFIGS = {
+  "bigbugit.digitalledlight.liveblog365.com": {
+    key: '9d20a54f0e50580170813bbcaffd4a11',
+    topKey: 'db54a48ff9ee9b416464f115e87d6edb'
+  },
+  "frontnova.wordle.infinityfreeapp.com": {
+    key: 'a8c5a45895746605f5e7a2f9c9cc18f8'
+  },
+  "27.hostingpk.infinityfree.me": {
+    key: '258a126db96603af459617c973ecb753',
+    topKey: 'ceb2d651381a5967bbc416c4be2a1456'
+  }
+};
+
+// ─── AD FUNCTIONS ──────────────────────────────────────────────────────────────
+function getAdScripts(host) {
+  const config = AD_CONFIGS[host];
+  if (!config) return null;
+  let scripts = { top: null, main: null };
+  if (config.topKey) {
+    scripts.top = `
 <script>
   atOptions = {
-    'key' : '72b6f3ac3fc2f43722e5f2196ef85add',
-    'format' : 'iframe',
-    'height' : 90,
-    'width' : 728,
-    'params' : {}
-  };
-</script>
-<script src="https://www.highperformanceformat.com/72b6f3ac3fc2f43722e5f2196ef85add/invoke.js"></script>
-`;
-
-const AD_TOP = `
-<div style="text-align:center; width:100%; padding:10px 0; background:#fff; border-bottom:1px solid #eee;">
-  ${AD_SCRIPT}
-</div>
-`;
-
-const AD_MIDDLE = `
-<div style="text-align:center; width:100%; padding:10px 0; background:#fff; margin:20px 0; border:1px solid #eee; border-radius:8px;">
-  ${AD_SCRIPT}
-</div>
-`;
-
-const AD_BOTTOM = `
-<div style="text-align:center; width:100%; padding:10px 0; background:#fff; border-top:1px solid #eee; margin-top:20px;">
-  ${AD_SCRIPT}
-</div>
-`;
-
-// ─── AD CONFIGURATION ──────────────────────────────────────────────────────────
-
-
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-const JOBS_PER_PAGE = 20;
-
-function renderHTML({ title, meta, bodyContent, schema }) {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="google-site-verification" content="f_swjSKQxA8Dye1qCFyBXzBnhlnmJ2vPjFOPiLsvIvo" />
-<title>${title}</title>
-<meta name="description" content="${meta}"/>
-<meta property="og:title" content="${title}"/>
-<meta property="og:description" content="${meta}"/>
-<meta name="robots" content="index, follow"/>
-${schema ? `<script type="application/ld+json">${JSON.stringify(schema, null, 2)}</script>` : ''}
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f5;color:#222;line-height:1.6}
-a{color:inherit;text-decoration:none}
-/* NAV */
-nav{background:#d62828;color:#fff;padding:0 1.5rem;display:flex;align-items:center;justify-content:space-between;height:60px;position:sticky;top:0;z-index:100}
-nav .brand{font-size:1.25rem;font-weight:700;color:#fff}
-nav .brand span{color:#ffd700}
-nav .nav-links{display:flex;gap:1.5rem;font-size:0.85rem}
-nav .nav-links a{color:rgba(255,255,255,0.8);transition:color .2s}
-nav .nav-links a:hover{color:#ffd700}
-/* HERO */
-.hero{background:linear-gradient(135deg,#d62828 0%,#a01c1c 50%,#6b1212 100%);color:#fff;padding:3rem 1.5rem;text-align:center}
-.hero h1{font-size:clamp(1.6rem,4vw,2.8rem);font-weight:800;margin-bottom:.75rem}
-.hero h1 .accent{color:#ffd700}
-.hero p{font-size:1rem;opacity:.85;margin-bottom:1.5rem;max-width:600px;margin-left:auto;margin-right:auto}
-.stat-bar{display:flex;justify-content:center;gap:2rem;flex-wrap:wrap;margin-top:1.5rem}
-.stat{text-align:center}.stat strong{display:block;font-size:1.5rem;color:#ffd700}
-.stat span{font-size:.8rem;opacity:.75}
-/* SEARCH */
-.search-bar{background:#fff;padding:1.25rem 1.5rem;border-bottom:1px solid #e0e0e0;display:flex;gap:.75rem;flex-wrap:wrap;max-width:960px;margin:0 auto}
-.search-bar input,.search-bar select{flex:1;min-width:160px;padding:.6rem .9rem;border:1.5px solid #d0d0d0;border-radius:8px;font-size:.9rem;outline:none}
-.search-bar input:focus,.search-bar select:focus{border-color:#d62828}
-.search-bar button{padding:.6rem 1.4rem;background:#ffd700;color:#1a1a2e;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9rem}
-/* FILTERS */
-.filter-row{background:#fff;border-bottom:1px solid #ebebeb;padding:.6rem 1.5rem;display:flex;gap:.5rem;flex-wrap:wrap;max-width:960px;margin:0 auto}
-.filter-chip{padding:.35rem .85rem;border:1.5px solid #d0d0d0;border-radius:20px;font-size:.78rem;cursor:pointer;background:#fff;transition:all .2s;white-space:nowrap}
-.filter-chip.active,.filter-chip:hover{background:#d62828;color:#fff;border-color:#d62828}
-/* LAYOUT */
-.container{max-width:960px;margin:0 auto;padding:1.5rem}
-.page-grid{display:grid;grid-template-columns:1fr;gap:1rem}
-/* JOB CARD */
-.job-card{background:#fff;border-radius:12px;padding:1.25rem 1.5rem;border:1.5px solid #e8e8e8;transition:border-color .2s,transform .15s;display:flex;flex-direction:column;gap:.75rem}
-.job-card:hover{border-color:#d62828;transform:translateY(-2px)}
-.card-header{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap}
-.card-title{font-size:1.05rem;font-weight:700;color:#1a1a2e;margin-bottom:.2rem}
-.card-company{font-size:.88rem;color:#555}
-.card-badges{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
-.badge{padding:.28rem .7rem;border-radius:20px;font-size:.73rem;font-weight:600;white-space:nowrap}
-.badge-remote{background:#e8f5e9;color:#2e7d32}
-.badge-office{background:#e3f2fd;color:#1565c0}
-.badge-type{background:#f3e5f5;color:#6a1b9a}
-.badge-exp{background:#fff3e0;color:#e65100}
-.card-meta{display:flex;gap:1rem;flex-wrap:wrap;font-size:.82rem;color:#666}
-.card-meta span{display:flex;align-items:center;gap:.3rem}
-.card-desc{font-size:.85rem;color:#555;line-height:1.6;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.card-footer{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem}
-.card-salary{font-weight:700;color:#1a1a2e;font-size:.9rem}
-.btn-apply{padding:.55rem 1.3rem;background:#d62828;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:.85rem;cursor:pointer;transition:background .2s}
-.btn-apply:hover{background:#a01c1c}
-/* JOB DETAIL */
-.job-detail{background:#fff;border-radius:12px;padding:2rem;border:1.5px solid #e8e8e8}
-.job-detail h1{font-size:1.6rem;font-weight:800;color:#1a1a2e;margin-bottom:.5rem}
-.detail-meta{display:flex;gap:.75rem;flex-wrap:wrap;margin:1rem 0;padding:1rem 0;border-top:1px solid #f0f0f0;border-bottom:1px solid #f0f0f0}
-.detail-chip{padding:.4rem 1rem;border-radius:8px;font-size:.82rem;font-weight:600;background:#f5f5f5;color:#333}
-.detail-chip.highlight{background:#fff8e1;color:#f57f17}
-.detail-body{font-size:.9rem;color:#444;line-height:1.8;white-space:pre-line;margin:1.5rem 0}
-.apply-section{background:#f9f9f9;border-radius:12px;padding:1.5rem;text-align:center;border:1.5px dashed #e0e0e0}
-.apply-section h3{margin-bottom:.5rem;color:#1a1a2e}
-.apply-section p{font-size:.85rem;color:#666;margin-bottom:1rem}
-.btn-apply-big{padding:.85rem 2.5rem;background:#d62828;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:1rem;cursor:pointer;transition:background .2s}
-.btn-apply-big:hover{background:#a01c1c}
-/* PAGINATION */
-.pagination{display:flex;justify-content:center;gap:.4rem;margin:2rem 0;flex-wrap:wrap}
-.pagination a,.pagination span{padding:.5rem .9rem;border-radius:8px;border:1.5px solid #e0e0e0;font-size:.85rem;background:#fff}
-.pagination a:hover{border-color:#d62828;color:#d62828}
-.pagination .current{background:#d62828;color:#fff;border-color:#d62828}
-/* BREADCRUMB */
-.breadcrumb{font-size:.82rem;color:#888;margin-bottom:1rem}
-.breadcrumb a{color:#d62828}
-/* SITEMAP NOTE */
-.info-box{background:#fff;border-radius:12px;padding:1.25rem 1.5rem;border-left:4px solid #d62828;margin-bottom:1rem;font-size:.88rem}
-/* FOOTER */
-footer{background:#1a1a2e;color:rgba(255,255,255,0.7);text-align:center;padding:1.5rem;font-size:.82rem;margin-top:3rem}
-footer a{color:#ffd700}
-/* MODAL */
-.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center}
-.modal-overlay.open{display:flex}
-.modal{background:#fff;border-radius:16px;padding:2rem;max-width:480px;width:90%;position:relative}
-.modal h2{font-size:1.2rem;font-weight:700;margin-bottom:1rem;color:#1a1a2e}
-.modal input{width:100%;padding:.7rem;border:1.5px solid #ddd;border-radius:8px;font-size:.9rem;margin-bottom:.85rem;outline:none}
-.modal input:focus{border-color:#d62828}
-.modal .btn-submit{width:100%;padding:.75rem;background:#d62828;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:.95rem}
-.modal .btn-submit:hover{background:#a01c1c}
-.modal .close-btn{position:absolute;top:1rem;right:1rem;background:none;border:none;font-size:1.4rem;cursor:pointer;color:#888}
-.success-msg{display:none;text-align:center;padding:1rem;color:#2e7d32;font-weight:600}
-@media(max-width:600px){.search-bar{flex-direction:column}.stat-bar{gap:1rem}}
-</style>
-
-</head>
-<body>
-${AD_TOP}
-<nav>
-  <a class="brand" href="/"><span>CA</span>NOVA<span>.ca</span></a>
-  <div class="nav-links">
-    <a href="/">Home</a>
-    <a href="/jobs">Browse Jobs</a>
-    <a href="/jobs?type=remote">Remote</a>
-    <a href="/sitemap">Sitemap</a>
-  </div>
-</nav>
-<!-- Center Ad Start -->
-<div style="display:flex; justify-content:center; margin:20px 0;">
-    <div>
-<script>
-  atOptions = {
-    'key' : 'd1b072857c7132ec474a48b3413701e2',
+    'key' : '${config.topKey}',
     'format' : 'iframe',
     'height' : 60,
     'width' : 468,
     'params' : {}
   };
 </script>
-<script src="https://www.highperformanceformat.com/d1b072857c7132ec474a48b3413701e2/invoke.js"></script>
-</div>
-</div>
-${bodyContent}
-${AD_BOTTOM}
-<footer>
-  &copy; 2025 CANOVA.ca — <strong>100,000 Jobs</strong> across Canada |
-  <a href="/jobs">Browse All</a> · <a href="/jobs?type=remote">Remote Jobs</a> · <a href="/sitemap">Sitemap</a>
-</footer>
+<script src="https://www.highperformanceformat.com/${config.topKey}/invoke.js"></script>
+`;
+  }
+  if (config.key) {
+    scripts.main = `
 <script>
-function openApply(title){
-  window.location.href='https://rightwing-production.up.railway.app/apply-now.html';
-}
+  atOptions = {
+    'key' : '${config.key}',
+    'format' : 'iframe',
+    'height' : 90,
+    'width' : 728,
+    'params' : {}
+  };
 </script>
+<script src="https://www.highperformanceformat.com/${config.key}/invoke.js"></script>
+`;
+  }
+  return scripts;
+}
+
+function getAdBanner(host) {
+  const scripts = getAdScripts(host);
+  if (!scripts) return '';
+  let ads = '';
+  if (scripts.top) {
+    ads += `
+<div style="text-align:center; width:100%; padding:8px 0; background:#fff; border-bottom:1px solid #eee;">
+  ${scripts.top}
+</div>
+`;
+  }
+  if (scripts.main) {
+    ads += `
+<div style="text-align:center; width:100%; padding:10px 0; background:#fff; border-bottom:1px solid #eee;">
+  ${scripts.main}
+</div>
+`;
+  }
+  return ads;
+}
+
+function getAdFooter(host) {
+  const scripts = getAdScripts(host);
+  if (!scripts || !scripts.main) return '';
+  return `
+<div style="text-align:center; width:100%; padding:10px 0; background:#fff; border-top:1px solid #eee; margin-top:20px;">
+  ${scripts.main}
+</div>
+`;
+}
+
+// ─── REWRITE FUNCTIONS ─────────────────────────────────────────────────────────
+function rewriteText(body, proxyHost) {
+  return body
+    .split(`https://${ORIGIN_DOMAIN}`).join(`https://${proxyHost}`)
+    .split(`http://${ORIGIN_DOMAIN}`).join(`https://${proxyHost}`)
+    .split('Vaia – Talents').join('Talent Portal')
+    .split('Vaia').join('Talent')
+    .split('hirerivet').join('TalentPortal');
+}
+
+// ─── RENDER HOME PAGE ──────────────────────────────────────────────────────────
+function renderHomePage(content, proxyHost) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="canonical" href="${BASE_URL}/">
+  <title>${content.title || 'Talent Portal'} - Find Your Dream Career</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #f0f4f8;
+      color: #1a202c;
+      line-height: 1.6;
+    }
+    .header {
+      background: linear-gradient(135deg, #1a237e 0%, #0d1445 100%);
+      color: white;
+      padding: 20px 0;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 20px;
+    }
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .logo {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -1px;
+    }
+    .logo span { color: #ffd700; }
+    .nav-links {
+      display: flex;
+      gap: 30px;
+      align-items: center;
+    }
+    .nav-links a {
+      color: white;
+      text-decoration: none;
+      font-weight: 500;
+      transition: opacity 0.3s;
+    }
+    .nav-links a:hover { opacity: 0.8; }
+    
+    .hero {
+      background: linear-gradient(135deg, #1a237e 0%, #0d1445 50%, #070a1f 100%);
+      color: white;
+      padding: 100px 0 80px;
+      text-align: center;
+      border-radius: 0 0 60px 60px;
+      margin-bottom: 40px;
+    }
+    .hero h1 {
+      font-size: 52px;
+      font-weight: 800;
+      margin-bottom: 20px;
+      letter-spacing: -1px;
+    }
+    .hero h1 .accent { color: #ffd700; }
+    .hero p {
+      font-size: 20px;
+      max-width: 600px;
+      margin: 0 auto 30px;
+      opacity: 0.9;
+    }
+    .search-box {
+      display: flex;
+      max-width: 600px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 50px;
+      overflow: hidden;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    }
+    .search-box input {
+      flex: 1;
+      padding: 18px 25px;
+      border: none;
+      outline: none;
+      font-size: 16px;
+    }
+    .search-box button {
+      padding: 18px 35px;
+      background: #ffd700;
+      border: none;
+      font-weight: 700;
+      color: #1a202c;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    .search-box button:hover { background: #f59e0b; }
+    
+    .stat-bar {
+      display: flex;
+      justify-content: center;
+      gap: 3rem;
+      flex-wrap: wrap;
+      margin-top: 2.5rem;
+    }
+    .stat-item { text-align: center; }
+    .stat-item .number {
+      font-size: 2rem;
+      font-weight: 800;
+      color: #ffd700;
+      display: block;
+    }
+    .stat-item .label {
+      font-size: 0.85rem;
+      opacity: 0.8;
+    }
+    
+    .section-title {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 30px;
+      color: #1a202c;
+      text-align: center;
+    }
+    .section-title span { color: #1a237e; }
+    
+    .job-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 25px;
+      margin-top: 20px;
+    }
+    .job-card {
+      background: white;
+      border-radius: 15px;
+      padding: 25px;
+      transition: transform 0.3s, box-shadow 0.3s;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    .job-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    }
+    .job-card h3 {
+      font-size: 18px;
+      margin-bottom: 8px;
+      color: #1a237e;
+    }
+    .job-card .company {
+      color: #718096;
+      font-weight: 500;
+      font-size: 0.95rem;
+    }
+    .job-card .location {
+      color: #a0aec0;
+      font-size: 14px;
+      margin: 8px 0;
+    }
+    .job-card .tag {
+      display: inline-block;
+      padding: 4px 12px;
+      background: #e2e8f0;
+      border-radius: 20px;
+      font-size: 12px;
+      color: #4a5568;
+    }
+    .job-card .salary {
+      font-weight: 700;
+      color: #1a237e;
+      margin-top: 10px;
+    }
+    
+    .featured-section {
+      background: white;
+      border-radius: 20px;
+      padding: 40px;
+      margin-bottom: 40px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    }
+    
+    .blog-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 25px;
+    }
+    .blog-card {
+      background: white;
+      border-radius: 15px;
+      overflow: hidden;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+      transition: transform 0.3s;
+      border: 1px solid #e2e8f0;
+    }
+    .blog-card:hover { transform: translateY(-5px); }
+    .blog-card .content { padding: 20px; }
+    .blog-card h4 {
+      font-size: 18px;
+      margin-bottom: 10px;
+      color: #1a237e;
+    }
+    .blog-card p {
+      color: #718096;
+      font-size: 14px;
+    }
+    
+    .apply-now-container {
+      text-align: center;
+      margin: 40px 0;
+      padding: 40px;
+      background: linear-gradient(135deg, #1a237e 0%, #0d1445 100%);
+      border-radius: 20px;
+      color: white;
+      box-shadow: 0 10px 30px rgba(26, 35, 126, 0.3);
+    }
+    .apply-now-container h2 {
+      font-size: 32px;
+      margin-bottom: 15px;
+    }
+    .apply-now-container p {
+      font-size: 18px;
+      opacity: 0.9;
+      margin-bottom: 25px;
+    }
+    .apply-now-btn {
+      display: inline-block;
+      padding: 18px 50px;
+      background: #ffd700;
+      color: #1a202c;
+      text-decoration: none;
+      border-radius: 50px;
+      font-weight: 700;
+      font-size: 18px;
+      transition: transform 0.3s, box-shadow 0.3s;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    .apply-now-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+    }
+    
+    .footer {
+      background: #1a1a2e;
+      color: rgba(255,255,255,0.7);
+      padding: 40px 0;
+      margin-top: 40px;
+      border-radius: 50px 50px 0 0;
+    }
+    .footer-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 30px;
+    }
+    .footer h4 {
+      margin-bottom: 15px;
+      color: #ffd700;
+    }
+    .footer a {
+      color: rgba(255,255,255,0.7);
+      text-decoration: none;
+      display: block;
+      margin-bottom: 8px;
+      transition: color 0.3s;
+    }
+    .footer a:hover { color: white; }
+    .footer-bottom {
+      text-align: center;
+      padding-top: 30px;
+      margin-top: 30px;
+      border-top: 1px solid #2d3748;
+    }
+    
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 32px; }
+      .hero { padding: 60px 0 40px; }
+      .nav-links { gap: 15px; font-size: 0.9rem; }
+      .search-box { flex-direction: column; border-radius: 20px; }
+      .search-box button { border-radius: 0 0 20px 20px; }
+      .stat-bar { gap: 1.5rem; }
+      .apply-now-container h2 { font-size: 24px; }
+    }
+  </style>
+  <meta name="google-site-verification" content="bGuP_rIwla6cpg952qUy0O7Y3pbHkPGsu2FvHv1RvnY" />
+  <meta name="google-site-verification" content="reSOHfSgwM50dbCxkg1FAA1EBYu2fe-PgQYN72v1-uo" />
+  <meta name="google-site-verification" content="8mxCdaOA6sexfOGvLjVikBJ8GFQKrCWCerdJy1jxf6s" />
+</head>
+<body>
+  <header class="header">
+    <div class="container header-content">
+      <div class="logo">Talent<span>Portal</span></div>
+      <nav class="nav-links">
+        <a href="/">Home</a>
+        <a href="/jobs">Jobs</a>
+        <a href="/blog">Blog</a>
+        <a href="/about">About</a>
+        <a href="/contact">Contact</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="container">
+      <h1>Your Dream Career <span class="accent">Starts Here</span></h1>
+      <p>Discover thousands of opportunities from top companies. Find the perfect job that matches your skills and passion.</p>
+      <div class="search-box">
+        <input type="text" placeholder="Search jobs, companies, or keywords...">
+        <button>Search Jobs</button>
+      </div>
+      <div class="stat-bar">
+        <div class="stat-item">
+          <span class="number">10K+</span>
+          <span class="label">Active Jobs</span>
+        </div>
+        <div class="stat-item">
+          <span class="number">5K+</span>
+          <span class="label">Companies</span>
+        </div>
+        <div class="stat-item">
+          <span class="number">50K+</span>
+          <span class="label">Happy Candidates</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="container">
+    <div class="featured-section">
+      <h2 class="section-title">Featured <span>Jobs</span></h2>
+      <div class="job-grid">
+        ${content.jobListings || `
+          <div class="job-card">
+            <h3>Software Engineer</h3>
+            <div class="company">Tech Corp Inc.</div>
+            <div class="location">📍 San Francisco, CA</div>
+            <span class="tag">Full-time</span>
+            <div class="salary">$120K - $160K</div>
+          </div>
+          <div class="job-card">
+            <h3>Product Manager</h3>
+            <div class="company">Innovation Labs</div>
+            <div class="location">📍 New York, NY</div>
+            <span class="tag">Remote</span>
+            <div class="salary">$130K - $170K</div>
+          </div>
+          <div class="job-card">
+            <h3>Data Scientist</h3>
+            <div class="company">AI Solutions</div>
+            <div class="location">📍 Austin, TX</div>
+            <span class="tag">Full-time</span>
+            <div class="salary">$140K - $180K</div>
+          </div>
+        `}
+      </div>
+    </div>
+
+    <div class="featured-section">
+      <h2 class="section-title">Latest <span>Insights</span></h2>
+      <div class="blog-grid">
+        ${content.blogPosts || `
+          <div class="blog-card">
+            <div class="content">
+              <h4>How to Ace Your Next Interview</h4>
+              <p>Tips and strategies to impress employers and land your dream job.</p>
+            </div>
+          </div>
+          <div class="blog-card">
+            <div class="content">
+              <h4>Top Skills for 2026</h4>
+              <p>Discover the most in-demand skills that employers are looking for.</p>
+            </div>
+          </div>
+          <div class="blog-card">
+            <div class="content">
+              <h4>Remote Work Trends</h4>
+              <p>How the workplace is evolving and what it means for job seekers.</p>
+            </div>
+          </div>
+        `}
+      </div>
+    </div>
+
+    <div class="apply-now-container">
+      <h2>Ready to Take the Next Step?</h2>
+      <p>Apply now and start your journey towards a brighter future</p>
+      <a href="https://ruwmqs-uq.myshopify.com/pages/apply" class="apply-now-btn" target="_blank">Apply Now →</a>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <h4>TalentPortal</h4>
+          <p style="color: rgba(255,255,255,0.6);">Your trusted partner in finding the perfect career opportunity.</p>
+        </div>
+        <div>
+          <h4>Quick Links</h4>
+          <a href="/jobs">Browse Jobs</a>
+          <a href="/companies">Companies</a>
+          <a href="/blog">Blog</a>
+        </div>
+        <div>
+          <h4>Support</h4>
+          <a href="/contact">Contact Us</a>
+          <a href="/faq">FAQ</a>
+          <a href="/privacy">Privacy Policy</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        &copy; 2026 TalentPortal. All rights reserved.
+      </div>
+    </div>
+  </footer>
 </body>
 </html>`;
 }
 
-// ── HOME PAGE ─────────────────────────────────────────────────────────────────
-app.get('/', (req, res) => {
-  const featuredIds = [1, 50001, 2, 50002, 3, 50003, 10000, 60000];
-  const featuredJobs = featuredIds.map(id => getJobData(id));
+// ─── RENDER INNER PAGE ─────────────────────────────────────────────────────────
+function renderInnerPage(pageTitle, content) {
+  let cleanContent = content.mainContent || '<p>Content not available</p>';
+  cleanContent = cleanContent
+    .replace(/<a[^>]*class="[^"]*apply[^"]*"[^>]*>[\s\S]*?Apply Now[\s\S]*?<\/a>/gi, '')
+    .replace(/<a[^>]*href="[^"]*apply[^"]*"[^>]*>[\s\S]*?Apply[\s]*Now[\s\S]*?<\/a>/gi, '')
+    .replace(/Apply Now/gi, '')
+    .replace(/<button[^>]*>[\s]*Apply[\s]*Now[\s]*<\/button>/gi, '')
+    .replace(/<div[^>]*class="[^"]*apply[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '');
 
-  const cards = featuredJobs.map(job => `
-<a href="/jobs/${job.id}" style="display:block">
-<div class="job-card">
-  <div class="card-header">
-    <div>
-      <div class="card-title">${job.title}</div>
-      <div class="card-company">${job.company}</div>
-    </div>
-    <div class="card-badges">
-      <span class="badge ${job.isRemote ? 'badge-remote' : 'badge-office'}">${job.isRemote ? '🌐 Remote' : '🏢 On-site'}</span>
-      <span class="badge badge-type">${job.jobType}</span>
-    </div>
-  </div>
-  <div class="card-meta">
-    <span>📍 ${job.location}</span>
-    <span>🏭 ${job.industry}</span>
-    <span>📅 ${job.postedDate}</span>
-  </div>
-  <div class="card-desc">${job.description.substring(0, 180)}...</div>
-  <div class="card-footer">
-    <span class="card-salary">${job.salary}</span>
-    <button class="btn-apply" onclick="event.preventDefault();openApply('${job.title.replace(/'/g, "\\'")} at ${job.company.replace(/'/g, "\\'")}')">Apply Now</button>
-  </div>
-</div>
-</a>`).join('');
-
-  const websiteSchema = {
-    "@context": "https://schema.org",
-    "@type": "WebSite",
-    "name": "CANOVA.ca",
-    "url": "https://rightwing-production.up.railway.app",
-    "description": "Canada's largest job portal with 100,000 job listings — remote and on-site across all provinces",
-    "potentialAction": {
-      "@type": "SearchAction",
-      "target": "https://rightwing-production.up.railway.app/jobs?q={search_term_string}",
-      "query-input": "required name=search_term_string"
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="canonical" href="${BASE_URL}${pageTitle ? '/jobs' : ''}">
+  <title>${pageTitle} | TalentPortal</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #f0f4f8;
+      color: #1a202c;
+      line-height: 1.6;
     }
-  };
-
-  const body = `
-<div class="hero">
-  <h1>Find Your Dream Job in <span class="accent">Canada</span></h1>
-  <p>100,000 verified job listings — remote & on-site — across all 13 provinces & territories</p>
-  <form action="/jobs" method="get" style="display:flex;gap:.75rem;max-width:580px;margin:0 auto;flex-wrap:wrap">
-    <input name="q" type="text" placeholder="Job title, skill, or company..." style="flex:2;min-width:200px;padding:.7rem 1rem;border-radius:8px;border:none;font-size:.95rem"/>
-    <select name="location" style="flex:1;min-width:140px;padding:.7rem;border-radius:8px;border:none;font-size:.85rem">
-      <option value="">All Provinces</option>
-      <option value="remote">Remote Only</option>
-      <option value="ontario">Ontario</option>
-      <option value="britishcolumbia">British Columbia</option>
-      <option value="alberta">Alberta</option>
-    </select>
-    <button type="submit" style="padding:.7rem 1.5rem;background:#ffd700;color:#1a1a2e;border:none;border-radius:8px;font-weight:700;cursor:pointer">Search →</button>
-  </form>
-  <div class="stat-bar">
-    <div class="stat"><strong>100,000</strong><span>Total Jobs</span></div>
-    <div class="stat"><strong>50,000</strong><span>Remote Jobs</span></div>
-    <div class="stat"><strong>50,000</strong><span>On-site Jobs</span></div>
-    <div class="stat"><strong>13</strong><span>Provinces/Territories</span></div>
-    <div class="stat"><strong>100+</strong><span>Companies</span></div>
-  </div>
-</div>
-
-<div class="container">
-  <div class="info-box">
-    🇨🇦 Canada's most comprehensive job board — browse <strong>50,000 remote jobs</strong> and <strong>50,000 on-site jobs</strong> across all industries.
-  </div>
-   ${AD_MIDDLE}
-  <h2 style="margin-bottom:1rem;font-size:1.2rem">Featured Jobs</h2>
-  <div class="page-grid">${cards}</div>
-  <div style="text-align:center;margin-top:2rem">
-    <a href="/jobs" style="display:inline-block;padding:.85rem 2.5rem;background:#1a1a2e;color:#fff;border-radius:10px;font-weight:700">Browse All 100,000 Jobs →</a>
-  </div>
-</div>`;
-
-  res.send(renderHTML({
-    title: 'CANOVA.ca — 100,000 Jobs in Canada | Remote & On-site',
-    meta: 'Find your next job in Canada. 100,000 verified listings — 50,000 remote and 50,000 on-site jobs across all 13 provinces and territories.',
-    bodyContent: body,
-    schema: websiteSchema
-  }));
-});
-
-// ── JOB LISTING PAGE ──────────────────────────────────────────────────────────
-app.get('/jobs', (req, res) => {
-  const page = Math.max(1, parseInt(req.query.page) || 1);
-  const typeFilter = req.query.type || 'all';
-  const locationFilter = req.query.location || '';
-  const q = req.query.q || '';
-
-  let jobIds = [];
-  if (typeFilter === 'remote') {
-    const start = (page - 1) * JOBS_PER_PAGE + 1;
-    for (let i = start; i < start + JOBS_PER_PAGE && i <= 50000; i++) jobIds.push(i);
-  } else if (typeFilter === 'onsite') {
-    const start = 50000 + (page - 1) * JOBS_PER_PAGE + 1;
-    for (let i = start; i < start + JOBS_PER_PAGE && i <= TOTAL_JOBS; i++) jobIds.push(i);
-  } else {
-    const start = (page - 1) * JOBS_PER_PAGE + 1;
-    for (let i = start; i < start + JOBS_PER_PAGE && i <= TOTAL_JOBS; i++) jobIds.push(i);
-  }
-
-  const jobs = jobIds.map(id => getJobData(id));
-  const totalPages = Math.ceil(TOTAL_JOBS / JOBS_PER_PAGE);
-
-  const cards = jobs.map(job => `
-<a href="/jobs/${job.id}" style="display:block">
-<div class="job-card">
-  <div class="card-header">
-    <div>
-      <div class="card-title">${job.title}</div>
-      <div class="card-company">${job.company}</div>
+    .header {
+      background: linear-gradient(135deg, #1a237e 0%, #0d1445 100%);
+      color: white;
+      padding: 15px 0;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 20px;
+    }
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .logo {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -1px;
+    }
+    .logo span { color: #ffd700; }
+    .nav-links {
+      display: flex;
+      gap: 25px;
+      align-items: center;
+    }
+    .nav-links a {
+      color: white;
+      text-decoration: none;
+      font-weight: 500;
+      transition: opacity 0.3s;
+    }
+    .nav-links a:hover { opacity: 0.8; }
+    
+    .breadcrumb {
+      background: white;
+      padding: 15px 0;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      margin-bottom: 30px;
+    }
+    .breadcrumb a {
+      color: #1a237e;
+      text-decoration: none;
+    }
+    
+    .content-wrapper {
+      background: white;
+      border-radius: 20px;
+      padding: 40px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+      margin-bottom: 30px;
+      max-width: 900px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .content-wrapper h1 {
+      font-size: 32px;
+      color: #1a202c;
+      margin-bottom: 20px;
+    }
+    .content-wrapper h2 {
+      font-size: 24px;
+      color: #2d3748;
+      margin-top: 30px;
+      margin-bottom: 15px;
+    }
+    .content-wrapper h3 {
+      font-size: 20px;
+      color: #4a5568;
+      margin-top: 20px;
+    }
+    .content-wrapper p {
+      color: #4a5568;
+      margin-bottom: 15px;
+    }
+    .content-wrapper img {
+      max-width: 100%;
+      border-radius: 10px;
+      margin: 20px 0;
+    }
+    .content-wrapper ul, .content-wrapper ol {
+      color: #4a5568;
+      margin: 15px 0 15px 25px;
+    }
+    
+    .apply-section {
+      text-align: center;
+      margin-top: 30px;
+      padding-top: 30px;
+      border-top: 2px solid #e2e8f0;
+    }
+    .apply-now-btn-inner {
+      display: inline-block;
+      padding: 15px 45px;
+      background: #ffd700;
+      color: #1a202c;
+      text-decoration: none;
+      border-radius: 50px;
+      font-weight: 700;
+      font-size: 16px;
+      transition: transform 0.3s, box-shadow 0.3s;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    .apply-now-btn-inner:hover {
+      transform: scale(1.05);
+      box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+    }
+    
+    .footer {
+      background: #1a1a2e;
+      color: rgba(255,255,255,0.7);
+      padding: 30px 0;
+      margin-top: 40px;
+    }
+    .footer-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+    .footer a {
+      color: rgba(255,255,255,0.7);
+      text-decoration: none;
+      margin: 0 10px;
+      transition: color 0.3s;
+    }
+    .footer a:hover { color: white; }
+    .footer-bottom {
+      text-align: center;
+      padding-top: 20px;
+      margin-top: 20px;
+      border-top: 1px solid #2d3748;
+    }
+    
+    @media (max-width: 768px) {
+      .content-wrapper { padding: 20px; }
+      .content-wrapper h1 { font-size: 24px; }
+      .nav-links { gap: 15px; font-size: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="container header-content">
+      <div class="logo">Talent<span>Portal</span></div>
+      <nav class="nav-links">
+        <a href="/">Home</a>
+        <a href="/jobs">Jobs</a>
+        <a href="/blog">Blog</a>
+      </nav>
     </div>
-    <div class="card-badges">
-      <span class="badge ${job.isRemote ? 'badge-remote' : 'badge-office'}">${job.isRemote ? '🌐 Remote' : '🏢 On-site'}</span>
-      <span class="badge badge-type">${job.jobType}</span>
-      <span class="badge badge-exp">${job.experience}</span>
-    </div>
-  </div>
-  <div class="card-meta">
-    <span>📍 ${job.location}</span>
-    <span>🏭 ${job.industry}</span>
-    <span>📅 ${job.postedDate}</span>
-  </div>
-  <div class="card-desc">${job.description.substring(0, 200)}...</div>
-  <div class="card-footer">
-    <span class="card-salary">${job.salary}</span>
-    <button class="btn-apply" onclick="event.preventDefault();openApply('${job.title.replace(/'/g, "\\'")} at ${job.company.replace(/'/g, "\\'")}')">Apply Now</button>
-  </div>
-</div>
-</a>`).join('');
+  </header>
 
-  const pages = [];
-  if (page > 1) pages.push(`<a href="/jobs?page=${page - 1}&type=${typeFilter}">← Prev</a>`);
-  const start = Math.max(1, page - 2);
-  const end = Math.min(totalPages, page + 2);
-  if (start > 1) pages.push(`<a href="/jobs?page=1&type=${typeFilter}">1</a><span>…</span>`);
-  for (let p = start; p <= end; p++) {
-    pages.push(p === page
-      ? `<span class="current">${p}</span>`
-      : `<a href="/jobs?page=${p}&type=${typeFilter}">${p}</a>`);
-  }
-  if (end < totalPages) pages.push(`<span>…</span><a href="/jobs?page=${totalPages}&type=${typeFilter}">${totalPages.toLocaleString()}</a>`);
-  if (page < totalPages) pages.push(`<a href="/jobs?page=${page + 1}&type=${typeFilter}">Next →</a>`);
-
-  const body = `
-<div class="hero" style="padding:1.75rem 1.5rem">
-  <h1 style="font-size:1.8rem">Browse <span class="accent">100,000 Jobs</span> in Canada</h1>
-  <p>Showing page ${page.toLocaleString()} of ${totalPages.toLocaleString()}</p>
-</div>
-<div class="filter-row">
-  <a href="/jobs"><span class="filter-chip ${typeFilter==='all'?'active':''}">All Jobs (100,000)</span></a>
-  <a href="/jobs?type=remote"><span class="filter-chip ${typeFilter==='remote'?'active':''}">🌐 Remote (50,000)</span></a>
-  <a href="/jobs?type=onsite"><span class="filter-chip ${typeFilter==='onsite'?'active':''}">🏢 On-site (50,000)</span></a>
-</div>
-<div class="container">
-  <div class="page-grid">${cards}</div>
-  <div class="pagination">${pages.join('')}</div>
-</div>`;
-
-  res.send(renderHTML({
-    title: `Canada Jobs — Page ${page} of ${totalPages.toLocaleString()} | CANOVA.ca`,
-    meta: `Browse ${TOTAL_JOBS.toLocaleString()} jobs in Canada. Page ${page}. Remote and on-site positions across all industries.`,
-    bodyContent: body,
-    schema: null
-  }));
-});
-
-// ── INDIVIDUAL JOB PAGE ───────────────────────────────────────────────────────
-app.get('/jobs/:id', (req, res) => {
-  const id = parseInt(req.params.id);
-  if (!id || id < 1 || id > TOTAL_JOBS) {
-    return res.status(404).send(renderHTML({
-      title: 'Job Not Found | CANOVA.ca',
-      meta: 'This job listing was not found.',
-      bodyContent: `<div class="container" style="text-align:center;padding:4rem 1.5rem"><h1>404 — Job Not Found</h1><p style="margin:1rem 0 2rem">This job may have been filled or removed.</p><a href="/jobs" style="color:#d62828">← Browse All Jobs</a></div>`,
-      schema: null
-    }));
-  }
-
-  const job = getJobData(id);
-  const schema = getJobSchema(job);
-
-  const relatedIds = [
-    Math.max(1, id - 2), Math.max(1, id - 1),
-    Math.min(TOTAL_JOBS, id + 1), Math.min(TOTAL_JOBS, id + 2)
-  ].filter(rid => rid !== id);
-  const relatedJobs = relatedIds.slice(0, 3).map(rid => getJobData(rid));
-
-  const relatedCards = relatedJobs.map(rj => `
-<a href="/jobs/${rj.id}" style="display:block">
-<div class="job-card" style="padding:1rem">
-  <div class="card-title" style="font-size:.95rem">${rj.title}</div>
-  <div class="card-company">${rj.company}</div>
-  <div style="margin-top:.5rem;display:flex;gap:.5rem;flex-wrap:wrap">
-    <span class="badge ${rj.isRemote ? 'badge-remote' : 'badge-office'}" style="font-size:.7rem">${rj.isRemote ? '🌐 Remote' : '🏢 On-site'}</span>
-    <span class="badge badge-type" style="font-size:.7rem">${rj.jobType}</span>
-  </div>
-</div>
-</a>`).join('');
-
-  const body = `
-<div class="container">
   <div class="breadcrumb">
-    <a href="/">Home</a> › <a href="/jobs">Jobs</a> › <a href="/jobs?type=${job.isRemote ? 'remote' : 'onsite'}">${job.isRemote ? 'Remote' : 'On-site'}</a> › ${job.title}
+    <div class="container">
+      <a href="/">Home</a> / <span>${pageTitle}</span>
+    </div>
   </div>
-  <div class="job-detail">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:1rem">
+
+  <div class="container">
+    <div class="content-wrapper">
+      ${cleanContent}
+      <div class="apply-section">
+        <a href="https://ruwmqs-uq.myshopify.com/pages/apply" class="apply-now-btn-inner" target="_blank">Apply Now →</a>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-content">
+        <div>&copy; 2026 TalentPortal. All rights reserved.</div>
+        <div>
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <a href="/contact">Contact</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        Helping you find your dream career
+      </div>
+    </div>
+  </footer>
+</body>
+</html>`;
+}
+
+// ─── FALLBACK PAGE ─────────────────────────────────────────────────────────────
+function serveFallbackPage(req) {
+  const url = new URL(req.url || '/', BASE_URL);
+  const pathParts = url.pathname.split('/');
+  const slug = pathParts[pathParts.length - 1] || 'job';
+  const jobTitle = slug
+    .split('-')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <title>${jobTitle} - Talent Portal</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f5;color:#222;line-height:1.6}
+    .header{background:linear-gradient(135deg,#1a237e 0%,#0d1445 100%);color:#fff;padding:1rem 0;text-align:center}
+    .header h1{font-size:1.8rem}
+    .header span{color:#ffd700}
+    .container{max-width:960px;margin:0 auto;padding:2rem 1.5rem}
+    .card{background:#fff;border-radius:12px;padding:2rem;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
+    .title{font-size:1.8rem;font-weight:700;color:#1a237e;margin-bottom:.5rem}
+    .company{color:#555;margin:1rem 0}
+    .badge{display:inline-block;padding:.3rem .8rem;border-radius:20px;font-size:.75rem;font-weight:600}
+    .badge-remote{background:#e8f5e9;color:#2e7d32}
+    .badge-fulltime{background:#e3f2fd;color:#1565c0}
+    .note{background:#fff3e0;border-left:4px solid #ff9800;padding:1rem;border-radius:8px;margin:1rem 0}
+    .btn{display:inline-block;padding:.8rem 2rem;background:#1a237e;color:#fff;border:none;border-radius:8px;text-decoration:none;font-weight:700}
+    .btn:hover{background:#0d1445}
+    .btn-apply{background:#ffd700;color:#1a202c}
+    .btn-apply:hover{background:#f59e0b}
+    .apply-section{margin-top:1.5rem;padding-top:1.5rem;border-top:2px solid #e2e8f0;text-align:center}
+    footer{background:#1a1a2e;color:rgba(255,255,255,0.7);text-align:center;padding:1.5rem;margin-top:2rem}
+    footer a{color:#ffd700}
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Talent<span>Portal</span></h1>
+  </div>
+  <div class="container">
+    <div class="card">
+      <div class="title">${jobTitle}</div>
+      <div class="company">🏢 Talent Company</div>
       <div>
-        <h1>${job.title}</h1>
-        <p style="font-size:1.05rem;color:#555;margin-top:.35rem">${job.company} · ${job.industry}</p>
+        <span class="badge badge-remote">🌐 Remote</span>
+        <span class="badge badge-fulltime">Full-time</span>
       </div>
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:.5rem">
-        <span class="badge ${job.isRemote ? 'badge-remote' : 'badge-office'}" style="font-size:.85rem;padding:.4rem 1rem">${job.isRemote ? '🌐 Remote' : '🏢 On-site'}</span>
-        <span style="font-size:.8rem;color:#888">Job ID: CA-${String(job.id).padStart(6, '0')}</span>
+      <div class="note">
+        <strong>ℹ️ Note:</strong> This page is being served from cache. The original job details will appear when the source is available.
+      </div>
+      <p style="margin:1.5rem 0;color:#666">This is a placeholder. The full job description will load once the remote server is online.</p>
+      <div class="apply-section">
+        <a href="https://ruwmqs-uq.myshopify.com/pages/apply" class="btn btn-apply" target="_blank">Apply Now →</a>
+      </div>
+      <div style="text-align:center;margin-top:1.5rem">
+        <a href="/" class="btn">← Back to Home</a>
+        <a href="/jobs" class="btn">Browse All Jobs</a>
       </div>
     </div>
-    <div class="detail-meta">
-      <span class="detail-chip highlight">💰 ${job.salary}</span>
-      <span class="detail-chip">📍 ${job.location}</span>
-      <span class="detail-chip">💼 ${job.jobType}</span>
-      <span class="detail-chip">📊 ${job.experience}</span>
-      <span class="detail-chip">🏭 ${job.industry}</span>
-      <span class="detail-chip">📅 Posted: ${job.postedDate}</span>
-    </div>
-    <div class="detail-body">${job.description}</div>
-    <div class="apply-section">
-      <h3>Ready to Apply?</h3>
-      <p>Submit your application for <strong>${job.title}</strong> at <strong>${job.company}</strong> — takes less than 2 minutes</p>
-      <button class="btn-apply-big" onclick="openApply('${job.title.replace(/'/g, "\\'")} at ${job.company.replace(/'/g, "\\'")}')">
-        Apply Now →
-      </button>
-    </div>
   </div>
+  <footer>&copy; 2026 TalentPortal</footer>
+</body>
+</html>`;
+}
 
-  <div style="margin-top:2rem">
-    <h2 style="font-size:1.1rem;margin-bottom:1rem">Similar Jobs You Might Like</h2>
-    <div class="page-grid">${relatedCards}</div>
-  </div>
-  <div style="text-align:center;margin-top:1.5rem">
-    <a href="/jobs" style="color:#d62828;font-weight:600">← Browse All 100,000 Jobs</a>
-  </div>
-</div>`;
+// ─── INJECT ADS ─────────────────────────────────────────────────────────────────
+function injectAds(html, host) {
+  const hasAds = !!AD_CONFIGS[host];
+  if (!hasAds) return html;
+  const adsHtml = getAdBanner(host);
+  html = html.replace(/<body[^>]*>/, `$&${adsHtml}`);
+  const footerAd = getAdFooter(host);
+  if (footerAd) {
+    html = html.replace(/<\/body>/, `${footerAd}</body>`);
+  }
+  return html;
+}
 
-  res.send(renderHTML({
-    title: `${job.title} at ${job.company} — ${job.location} | CANOVA.ca`,
-    meta: `${job.title} job at ${job.company}. ${job.isRemote ? 'Remote' : job.location}. ${job.salary}. Apply now on CANOVA.ca.`,
-    bodyContent: body,
-    schema
-  }));
+// ─── EXTRACT CONTENT ────────────────────────────────────────────────────────────
+function extractContent(body) {
+  const titleMatch = body.match(/<title>([^<]*)<\/title>/i);
+  const title = titleMatch ? titleMatch[1] : "Job Portal";
+  
+  let mainContent = "";
+  const mainMatch = body.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
+  if (mainMatch) {
+    mainContent = mainMatch[1];
+  } else {
+    const contentMatch = body.match(/<div[^>]*class="[^"]*content[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    if (contentMatch) mainContent = contentMatch[1];
+  }
+  
+  let jobListings = "";
+  const jobMatch = body.match(/<div[^>]*class="[^"]*job[^"]*"[^>]*>([\s\S]*?)<\/div>/gi);
+  if (jobMatch) {
+    jobListings = jobMatch.join("");
+  }
+  
+  let blogPosts = "";
+  const blogMatch = body.match(/<article[^>]*>([\s\S]*?)<\/article>/gi);
+  if (blogMatch) {
+    blogPosts = blogMatch.join("");
+  }
+  
+  return { title, mainContent, jobListings, blogPosts };
+}
+
+// ─── MAIN HANDLER ──────────────────────────────────────────────────────────────
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+app.use((req, res, next) => {
+  // Get the host from the request
+  const host = req.get('host');
+  req.proxyHost = host;
+  req.hasAds = !!AD_CONFIGS[host];
+  next();
 });
 
-// ── SITEMAP INDEX ─────────────────────────────────────────────────────────────
-app.get('/sitemap.xml', (req, res) => {
-  const totalSitemaps = 100;
-  let xml = `<?xml version="1.0" encoding="UTF-8"?>
+// ─── HOME PAGE ─────────────────────────────────────────────────────────────────
+app.get('/', async (req, res) => {
+  const cacheKey = 'home_page';
+  let cached = cache.get(cacheKey);
+  
+  if (cached) {
+    return res.send(cached);
+  }
+  
+  try {
+    const response = await fetch(`https://${ORIGIN_DOMAIN}/`);
+    const body = await response.text();
+    
+    // Rewrite content
+    let html = rewriteText(body, req.proxyHost);
+    
+    // Remove unwanted content
+    html = html.replace(/Common Interview Questions And Answers/gi, "");
+    html = html.replace(/Ads/gi, "");
+    html = html.replace(/Close share/gi, "");
+    html = html.replace(/Copy link/gi, "");
+    html = html.replace(/Back to blog/gi, "");
+    html = html.replace(/Get Hired Faster With Roku!/gi, "");
+    
+    // Remove share icons
+    html = html.replace(/<[^>]*class="[^"]*share[^"]*"[^>]*>[\s\S]*?<\/[^>]*>/gi, "");
+    html = html.replace(/<[^>]*class="[^"]*social[^"]*"[^>]*>[\s\S]*?<\/[^>]*>/gi, "");
+    html = html.replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, (match) => {
+      if (match.includes("share") || match.includes("social") || match.includes("icon")) {
+        return "";
+      }
+      return match;
+    });
+    
+    // Extract content
+    const content = extractContent(html);
+    const finalHtml = renderHomePage(content, req.proxyHost);
+    
+    // Inject ads
+    const withAds = injectAds(finalHtml, req.proxyHost);
+    
+    cache.set(cacheKey, withAds);
+    res.send(withAds);
+    
+  } catch (error) {
+    console.error('Home page error:', error.message);
+    const fallback = serveFallbackPage(req);
+    res.send(fallback);
+  }
+});
+
+// ─── JOB LISTING PAGE ─────────────────────────────────────────────────────────
+app.get('/jobs', async (req, res) => {
+  const cacheKey = 'jobs_page';
+  let cached = cache.get(cacheKey);
+  
+  if (cached) {
+    return res.send(cached);
+  }
+  
+  try {
+    const response = await fetch(`https://${ORIGIN_DOMAIN}/jobs`);
+    const body = await response.text();
+    
+    let html = rewriteText(body, req.proxyHost);
+    html = html.replace(/Common Interview Questions And Answers/gi, "");
+    html = html.replace(/Ads/gi, "");
+    html = html.replace(/Close share/gi, "");
+    html = html.replace(/Copy link/gi, "");
+    html = html.replace(/Back to blog/gi, "");
+    html = html.replace(/Get Hired Faster With Roku!/gi, "");
+    
+    html = html.replace(/<[^>]*class="[^"]*share[^"]*"[^>]*>[\s\S]*?<\/[^>]*>/gi, "");
+    html = html.replace(/<[^>]*class="[^"]*social[^"]*"[^>]*>[\s\S]*?<\/[^>]*>/gi, "");
+    html = html.replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, (match) => {
+      if (match.includes("share") || match.includes("social") || match.includes("icon")) {
+        return "";
+      }
+      return match;
+    });
+    
+    const content = extractContent(html);
+    const finalHtml = renderHomePage({ ...content, title: 'Browse Jobs' }, req.proxyHost);
+    const withAds = injectAds(finalHtml, req.proxyHost);
+    
+    cache.set(cacheKey, withAds);
+    res.send(withAds);
+    
+  } catch (error) {
+    console.error('Jobs page error:', error.message);
+    const fallback = serveFallbackPage(req);
+    res.send(fallback);
+  }
+});
+
+// ─── INDIVIDUAL JOB PAGE ──────────────────────────────────────────────────────
+app.get('/jobs/:id', async (req, res) => {
+  const jobId = req.params.id;
+  const cacheKey = `job_${jobId}`;
+  let cached = cache.get(cacheKey);
+  
+  if (cached) {
+    return res.send(cached);
+  }
+  
+  try {
+    const response = await fetch(`https://${ORIGIN_DOMAIN}/jobs/${jobId}`);
+    
+    if (response.status === 404) {
+      return res.status(404).send(serveFallbackPage(req));
+    }
+    
+    const body = await response.text();
+    
+    let html = rewriteText(body, req.proxyHost);
+    html = html.replace(/Common Interview Questions And Answers/gi, "");
+    html = html.replace(/Ads/gi, "");
+    html = html.replace(/Close share/gi, "");
+    html = html.replace(/Copy link/gi, "");
+    html = html.replace(/Back to blog/gi, "");
+    html = html.replace(/Get Hired Faster With Roku!/gi, "");
+    
+    // Remove Apply Now buttons from content
+    html = html.replace(/<a[^>]*class="[^"]*apply[^"]*"[^>]*>[\s\S]*?Apply Now[\s\S]*?<\/a>/gi, '');
+    html = html.replace(/<a[^>]*href="[^"]*apply[^"]*"[^>]*>[\s\S]*?Apply[\s]*Now[\s\S]*?<\/a>/gi, '');
+    html = html.replace(/<a[^>]*>[\s]*Apply[\s]*Now[\s]*<\/a>/gi, '');
+    html = html.replace(/<button[^>]*>[\s]*Apply[\s]*Now[\s]*<\/button>/gi, '');
+    html = html.replace(/<div[^>]*class="[^"]*apply[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '');
+    html = html.replace(/Apply Now/gi, '');
+    
+    html = html.replace(/<[^>]*class="[^"]*share[^"]*"[^>]*>[\s\S]*?<\/[^>]*>/gi, "");
+    html = html.replace(/<[^>]*class="[^"]*social[^"]*"[^>]*>[\s\S]*?<\/[^>]*>/gi, "");
+    html = html.replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, (match) => {
+      if (match.includes("share") || match.includes("social") || match.includes("icon")) {
+        return "";
+      }
+      return match;
+    });
+    
+    const content = extractContent(html);
+    const pageTitle = content.title || "Job Details";
+    const finalHtml = renderInnerPage(pageTitle, content);
+    const withAds = injectAds(finalHtml, req.proxyHost);
+    
+    cache.set(cacheKey, withAds);
+    res.send(withAds);
+    
+  } catch (error) {
+    console.error('Job page error:', error.message);
+    const fallback = serveFallbackPage(req);
+    res.send(fallback);
+  }
+});
+
+// ─── SITEMAP ──────────────────────────────────────────────────────────────────
+app.get('/sitemap.xml', async (req, res) => {
+  const cacheKey = 'sitemap_index';
+  let cached = cache.get(cacheKey);
+  
+  if (cached) {
+    return res.type('application/xml').send(cached);
+  }
+  
+  try {
+    const response = await fetch(`https://${ORIGIN_DOMAIN}/sitemap.xml`);
+    let body = await response.text();
+    body = body.replace(/https:\/\/${ORIGIN_DOMAIN}/g, BASE_URL);
+    
+    cache.set(cacheKey, body);
+    res.type('application/xml').send(body);
+    
+  } catch (error) {
+    // Generate fallback sitemap
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`;
-  for (let i = 1; i <= totalSitemaps; i++) {
-    xml += `\n<sitemap><loc>https://rightwing-production.up.railway.app/sitemap-${i}.xml</loc></sitemap>`;
+    for (let i = 1; i <= 100; i++) {
+      xml += `\n  <sitemap><loc>${BASE_URL}/sitemap-${i}.xml</loc></sitemap>`;
+    }
+    xml += `\n</sitemapindex>`;
+    res.type('application/xml').send(xml);
   }
-  xml += `\n</sitemapindex>`;
-  res.type('application/xml').send(xml);
 });
 
-app.get('/sitemap-:num.xml', (req, res) => {
-  const num = parseInt(req.params.num);
-  if (!num || num < 1 || num > 100) return res.status(404).send('Not found');
-  const start = (num - 1) * 1000 + 1;
-  const end = Math.min(num * 1000, TOTAL_JOBS);
-  let xml = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`;
-  for (let i = start; i <= end; i++) {
-    xml += `\n<url><loc>https://rightwing-production.up.railway.app/jobs/${i}</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>`;
+app.get('/sitemap-:num.xml', async (req, res) => {
+  const num = req.params.num;
+  const cacheKey = `sitemap_${num}`;
+  let cached = cache.get(cacheKey);
+  
+  if (cached) {
+    return res.type('application/xml').send(cached);
   }
-  xml += `\n</urlset>`;
-  res.type('application/xml').send(xml);
+  
+  try {
+    const response = await fetch(`https://${ORIGIN_DOMAIN}/sitemap-${num}.xml`);
+    
+    if (response.status === 404) {
+      return res.status(404).send('Not found');
+    }
+    
+    let body = await response.text();
+    body = body.replace(/https:\/\/${ORIGIN_DOMAIN}/g, BASE_URL);
+    
+    cache.set(cacheKey, body);
+    res.type('application/xml').send(body);
+    
+  } catch (error) {
+    res.status(404).send('Not found');
+  }
 });
 
-// ── SITEMAP HTML PAGE ─────────────────────────────────────────────────────────
-app.get('/sitemap', (req, res) => {
-  const body = `
-<div class="container">
-  <h1 style="margin-bottom:1rem">Sitemap — CANOVA.ca</h1>
-  <div class="info-box">📌 100,000 individual job pages + XML sitemaps for all search engines</div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin-top:1rem">
-    <div class="job-card">
-      <div class="card-title">Main Pages</div>
-      <div style="display:flex;flex-direction:column;gap:.5rem;margin-top:.75rem;font-size:.88rem">
-        <a href="/" style="color:#d62828">🏠 Home</a>
-        <a href="/jobs" style="color:#d62828">📋 All Jobs (100,000)</a>
-        <a href="/jobs?type=remote" style="color:#d62828">🌐 Remote Jobs (50,000)</a>
-        <a href="/jobs?type=onsite" style="color:#d62828">🏢 On-site Jobs (50,000)</a>
-      </div>
-    </div>
-    <div class="job-card">
-      <div class="card-title">XML Sitemaps</div>
-      <div style="display:flex;flex-direction:column;gap:.5rem;margin-top:.75rem;font-size:.88rem">
-        <a href="/sitemap.xml" style="color:#d62828">📄 Sitemap Index</a>
-        <a href="/sitemap-1.xml" style="color:#d62828">📄 Sitemap 1 (Jobs 1–1,000)</a>
-        <a href="/sitemap-2.xml" style="color:#d62828">📄 Sitemap 2 (Jobs 1,001–2,000)</a>
-        <span style="color:#888">… 100 sitemap files total</span>
-      </div>
-    </div>
-    <div class="job-card">
-      <div class="card-title">Job Pages Range</div>
-      <div style="display:flex;flex-direction:column;gap:.5rem;margin-top:.75rem;font-size:.88rem">
-        <a href="/jobs/1" style="color:#d62828">Job #1 (First Remote Job)</a>
-        <a href="/jobs/50000" style="color:#d62828">Job #50,000 (Last Remote Job)</a>
-        <a href="/jobs/50001" style="color:#d62828">Job #50,001 (First On-site Job)</a>
-        <a href="/jobs/100000" style="color:#d62828">Job #100,000 (Last On-site Job)</a>
-      </div>
-    </div>
-  </div>
-</div>`;
-
-  res.send(renderHTML({
-    title: 'Sitemap | CANOVA.ca',
-    meta: 'Complete sitemap of CANOVA.ca with 100,000 job listings across Canada.',
-    bodyContent: body,
-    schema: null
-  }));
-});
-
-// ── ROBOTS.TXT ────────────────────────────────────────────────────────────────
+// ─── ROBOTS.TXT ────────────────────────────────────────────────────────────────
 app.get('/robots.txt', (req, res) => {
   res.type('text/plain').send(`User-agent: *
 Allow: /
-Sitemap: https://rightwing-production.up.railway.app/sitemap.xml
+Sitemap: ${BASE_URL}/sitemap.xml
 Disallow: /api/`);
 });
 
-// ── API ─────────────────────────────────────────────────────────────────────
-app.get('/api/jobs/:id', (req, res) => {
-  const id = parseInt(req.params.id);
-  if (!id || id < 1 || id > TOTAL_JOBS) return res.status(404).json({ error: 'Job not found' });
-  const job = getJobData(id);
-  res.json({ job, schema: getJobSchema(job) });
+// ─── SITEMAP HTML ────────────────────────────────────────────────────────────
+app.get('/sitemap', (req, res) => {
+  const html = `<!DOCTYPE html>
+<html>
+<head><title>Sitemap - TalentPortal</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:Arial,sans-serif;background:#f5f5f5;padding:2rem;color:#222}
+  .container{max-width:960px;margin:0 auto}
+  h1{color:#1a237e;margin-bottom:1rem}
+  .card{background:#fff;border-radius:12px;padding:1.5rem;margin-bottom:1rem;border:1px solid #e8e8e8}
+  .card h2{color:#1a237e;margin-bottom:.5rem}
+  .card a{color:#1a237e;text-decoration:none;display:block;padding:.3rem 0}
+  .card a:hover{text-decoration:underline}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1rem}
+  .footer{text-align:center;padding:1.5rem;color:#888;margin-top:2rem}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>📄 Sitemap - TalentPortal</h1>
+  <div class="grid">
+    <div class="card">
+      <h2>Main Pages</h2>
+      <a href="/">🏠 Home</a>
+      <a href="/jobs">📋 All Jobs</a>
+      <a href="/blog">📝 Blog</a>
+      <a href="/about">ℹ️ About</a>
+      <a href="/contact">📧 Contact</a>
+    </div>
+    <div class="card">
+      <h2>XML Sitemaps</h2>
+      <a href="/sitemap.xml">📄 Sitemap Index</a>
+      <a href="/sitemap-1.xml">📄 Sitemap 1 (Jobs 1-1000)</a>
+      <a href="/sitemap-2.xml">📄 Sitemap 2 (Jobs 1001-2000)</a>
+      <span style="color:#888;font-size:.85rem">… 100 sitemap files total</span>
+    </div>
+    <div class="card">
+      <h2>Job Pages Range</h2>
+      <a href="/jobs/1">🔹 Job #1 (First Remote Job)</a>
+      <a href="/jobs/50000">🔹 Job #50,000 (Last Remote Job)</a>
+      <a href="/jobs/50001">🔹 Job #50,001 (First On-site Job)</a>
+      <a href="/jobs/100000">🔹 Job #100,000 (Last Job)</a>
+    </div>
+  </div>
+</div>
+<div class="footer">&copy; 2026 TalentPortal</div>
+</body>
+</html>`;
+  res.send(html);
 });
 
-app.get('/api/jobs', (req, res) => {
-  const page = Math.max(1, parseInt(req.query.page) || 1);
-  const limit = Math.min(50, parseInt(req.query.limit) || 20);
-  const start = (page - 1) * limit + 1;
-  const jobs = [];
-  for (let i = start; i < start + limit && i <= TOTAL_JOBS; i++) {
-    jobs.push(getJobData(i));
-  }
-  res.json({ page, limit, total: TOTAL_JOBS, jobs });
+// ─── 404 HANDLER ──────────────────────────────────────────────────────────────
+app.use((req, res) => {
+  res.status(404).send(serveFallbackPage(req));
 });
 
+// ─── START SERVER ──────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`🇨🇦 CANOVA.ca running on port ${PORT}`);
-  console.log(`📋 ${TOTAL_JOBS.toLocaleString()} job pages ready`);
-  console.log(`🏢 ${companies.length} companies hiring in Canada`);
-  console.log(`📍 ${canadaLocations.length} locations across Canada`);
+  console.log(`🚀 TalentPortal Proxy running on port ${PORT}`);
+  console.log(`📡 Proxying: https://${ORIGIN_DOMAIN}`);
+  console.log(`🌍 Base URL: ${BASE_URL}`);
+  console.log(`💾 Cache TTL: 24 hours`);
+  console.log(`📋 Proxy host: ${ORIGIN_DOMAIN}`);
 });
