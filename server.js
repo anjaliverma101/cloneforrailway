@@ -168,113 +168,125 @@ app.use((req, res, next) => {
   next();
 });
 
-// ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
+// ─── RAILWAY HEALTH CHECKS ──────────────────────────────────────────────────────
+app.get('/ip', (req, res) => {
+  res.send('OK');
+});
+
 app.get('/health', (req, res) => {
-  res.send('Proxy is running!');
+  res.send('✅ Proxy is running!');
 });
 
-// ─── ROUTES ────────────────────────────────────────────────────────────────────
-
-// Home Page
-app.get('/', async (req, res) => {
-  const cacheKey = 'home_page';
-  let cached = cache.get(cacheKey);
-  
+// ─── SIMPLE HOME PAGE ──────────────────────────────────────────────────────
+app.get('/', (req, res) => {
+  const cached = cache.get('home_page');
   if (cached) {
     return res.send(cached);
   }
+
+  const fallback = serveFallbackPage(req);
+  res.send(fallback);
   
-  try {
-    const response = await fetch(`https://${ORIGIN_DOMAIN}/`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
+  (async () => {
+    try {
+      const response = await fetch(`https://${ORIGIN_DOMAIN}/`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1'
+        }
+      });
+      if (response.ok) {
+        let html = await response.text();
+        html = rewriteText(html, req.proxyHost);
+        html = injectAds(html, req.proxyHost);
+        cache.set('home_page', html);
       }
-    });
-    let html = await response.text();
-    html = rewriteText(html, req.proxyHost);
-    html = injectAds(html, req.proxyHost);
-    cache.set(cacheKey, html);
-    res.send(html);
-  } catch (error) {
-    console.error('Home error:', error.message);
-    res.send(serveFallbackPage(req, error));
-  }
+    } catch (error) {
+      console.error('Background fetch error:', error.message);
+    }
+  })();
 });
 
-// Jobs Page
-app.get('/jobs', async (req, res) => {
+// ─── JOBS PAGE ─────────────────────────────────────────────────────────────────
+app.get('/jobs', (req, res) => {
   const cacheKey = `jobs_${req.query.type || 'all'}_${req.query.page || 1}`;
-  let cached = cache.get(cacheKey);
+  const cached = cache.get(cacheKey);
   
   if (cached) {
     return res.send(cached);
   }
+
+  const fallback = serveFallbackPage(req);
+  res.send(fallback);
   
-  try {
-    const query = new URLSearchParams(req.query).toString();
-    const url = `https://${ORIGIN_DOMAIN}/jobs${query ? '?' + query : ''}`;
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
+  (async () => {
+    try {
+      const query = new URLSearchParams(req.query).toString();
+      const url = `https://${ORIGIN_DOMAIN}/jobs${query ? '?' + query : ''}`;
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1'
+        }
+      });
+      if (response.ok) {
+        let html = await response.text();
+        html = rewriteText(html, req.proxyHost);
+        html = injectAds(html, req.proxyHost);
+        cache.set(cacheKey, html);
       }
-    });
-    let html = await response.text();
-    html = rewriteText(html, req.proxyHost);
-    html = injectAds(html, req.proxyHost);
-    cache.set(cacheKey, html);
-    res.send(html);
-  } catch (error) {
-    console.error('Jobs error:', error.message);
-    res.send(serveFallbackPage(req, error));
-  }
+    } catch (error) {
+      console.error('Background fetch error:', error.message);
+    }
+  })();
 });
 
-// Individual Job Page
-app.get('/jobs/:id', async (req, res) => {
+// ─── INDIVIDUAL JOB PAGE ──────────────────────────────────────────────────────
+app.get('/jobs/:id', (req, res) => {
   const jobId = req.params.id;
   const cacheKey = `job_${jobId}`;
-  let cached = cache.get(cacheKey);
+  const cached = cache.get(cacheKey);
   
   if (cached) {
     return res.send(cached);
   }
+
+  const fallback = serveFallbackPage(req);
+  res.send(fallback);
   
-  try {
-    const response = await fetch(`https://${ORIGIN_DOMAIN}/jobs/${jobId}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
+  (async () => {
+    try {
+      const response = await fetch(`https://${ORIGIN_DOMAIN}/jobs/${jobId}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1'
+        }
+      });
+      if (response.ok) {
+        let html = await response.text();
+        html = rewriteText(html, req.proxyHost);
+        html = injectAds(html, req.proxyHost);
+        cache.set(cacheKey, html);
       }
-    });
-    if (response.status === 404) {
-      return res.status(404).send(serveFallbackPage(req, 'Job not found'));
+    } catch (error) {
+      console.error('Background fetch error:', error.message);
     }
-    let html = await response.text();
-    html = rewriteText(html, req.proxyHost);
-    html = injectAds(html, req.proxyHost);
-    cache.set(cacheKey, html);
-    res.send(html);
-  } catch (error) {
-    console.error('Job error:', error.message);
-    res.send(serveFallbackPage(req, error));
-  }
+  })();
 });
 
-// Sitemap
+// ─── SITEMAP ──────────────────────────────────────────────────────────────────
 app.get('/sitemap.xml', async (req, res) => {
   const cacheKey = 'sitemap_index';
   let cached = cache.get(cacheKey);
@@ -286,24 +298,26 @@ app.get('/sitemap.xml', async (req, res) => {
   try {
     const response = await fetch(`https://${ORIGIN_DOMAIN}/sitemap.xml`, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       }
     });
-    let xml = await response.text();
-    xml = xml.replace(new RegExp(`https://${ORIGIN_DOMAIN}`, 'g'), req.baseUrl);
-    cache.set(cacheKey, xml);
-    res.type('application/xml').send(xml);
-  } catch (error) {
-    let xml = `<?xml version="1.0" encoding="UTF-8"?>
-<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`;
-    for (let i = 1; i <= 100; i++) {
-      xml += `\n  <sitemap><loc>${req.baseUrl}/sitemap-${i}.xml</loc></sitemap>`;
+    if (response.ok) {
+      let xml = await response.text();
+      xml = xml.replace(new RegExp(`https://${ORIGIN_DOMAIN}`, 'g'), req.baseUrl);
+      cache.set(cacheKey, xml);
+      return res.type('application/xml').send(xml);
     }
-    xml += `\n</sitemapindex>`;
-    res.type('application/xml').send(xml);
+  } catch (error) {
+    console.error('Sitemap error:', error.message);
   }
+  
+  let xml = `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`;
+  for (let i = 1; i <= 100; i++) {
+    xml += `\n  <sitemap><loc>${req.baseUrl}/sitemap-${i}.xml</loc></sitemap>`;
+  }
+  xml += `\n</sitemapindex>`;
+  res.type('application/xml').send(xml);
 });
 
 app.get('/sitemap-:num.xml', async (req, res) => {
@@ -321,19 +335,19 @@ app.get('/sitemap-:num.xml', async (req, res) => {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       }
     });
-    if (response.status === 404) {
-      return res.status(404).send('Not found');
+    if (response.ok) {
+      let xml = await response.text();
+      xml = xml.replace(new RegExp(`https://${ORIGIN_DOMAIN}`, 'g'), req.baseUrl);
+      cache.set(cacheKey, xml);
+      return res.type('application/xml').send(xml);
     }
-    let xml = await response.text();
-    xml = xml.replace(new RegExp(`https://${ORIGIN_DOMAIN}`, 'g'), req.baseUrl);
-    cache.set(cacheKey, xml);
-    res.type('application/xml').send(xml);
   } catch (error) {
-    res.status(404).send('Not found');
+    console.error('Sitemap error:', error.message);
   }
+  res.status(404).send('Not found');
 });
 
-// Robots.txt
+// ─── ROBOTS.TXT ────────────────────────────────────────────────────────────────
 app.get('/robots.txt', (req, res) => {
   res.type('text/plain').send(`User-agent: *
 Allow: /
@@ -341,7 +355,7 @@ Sitemap: ${req.baseUrl}/sitemap.xml
 Disallow: /api/`);
 });
 
-// Sitemap HTML
+// ─── SITEMAP HTML ────────────────────────────────────────────────────────────
 app.get('/sitemap', (req, res) => {
   const baseUrl = req.baseUrl;
   res.send(`<!DOCTYPE html>
