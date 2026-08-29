@@ -6,7 +6,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ─── ORIGIN DOMAIN TO CLONE ──────────────────────────────────────────────────
-const ORIGIN_DOMAIN = 'hirerivet.up.railway.app';
+const ORIGIN_DOMAIN = 'highdatacost.9y.42web.io';
 
 // ─── SIMPLE CACHE (in-memory) ──────────────────────────────────────────────
 const cache = new Map();
