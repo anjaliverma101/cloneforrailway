@@ -1,20 +1,16 @@
 {
-  "name": "hirerivet-proxy",
+  "name": "job-portal-clone",
   "version": "1.0.0",
-  "description": "Reverse Proxy for hirerivet.up.railway.app",
+  "description": "Clone of hirerivet.up.railway.app",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
     "compression": "^1.7.4",
     "axios": "^1.6.0",
     "node-cache": "^5.1.2"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.1"
   },
   "engines": {
     "node": ">=18.0.0"
